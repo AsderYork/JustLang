@@ -11,6 +11,7 @@ class CP_Subject;
 
 class LexicalParser;
 class LogicalParser;
+class Evaluator;
 
 /**!
 	This class provides text-based access to internals of the engine
@@ -168,6 +169,7 @@ class LogicalParser;
 	class LexicalParser
 	{
 	private:
+		friend class Evaluator;
 		friend class LogicalParser;
 		struct Lexema
 		{
@@ -175,13 +177,17 @@ class LogicalParser;
 			Not all marks can have a meaning. There's a vector of ones that do
 			*/
 			static std::vector<std::string> AllowedMarks;
+			static std::vector<std::string> UsedTypes;
+			static std::vector<std::string> Keywords;
 			enum LEXEME_TYPE {
 				NONE,
 				NAME,//"A_name","Name34", "Ultra name"; Everything, that is a name of something. Or just a string of text
 				NUMBER,//"5"
 				NUMBER_DOTTED,
 				MARK,
-				LITERAL
+				LITERAL,
+				TYPENAME,//"str, num"//Can be function or precede a NAME
+				KEYWORD//"while", if;//Keywords acts as functions 
 			} Type;
 
 			std::string str;
@@ -206,16 +212,19 @@ class LogicalParser;
 	class LogicalParser
 	{
 	private:
+		friend class Evaluator;
 		//Pre-declaration;
 		struct VariableName;
 		struct NumericalValue;
 		struct Literal;
 		struct Function;
 		struct Operator;
-		struct EVAL_Num;
-		struct EVAL_Str;
-		enum class UnitType { VAR, NUM, FUNC, OP, LIETARL};//Variable, Numerical, Function, Operator, ...
-		using LogicalUnit = std::pair<std::variant<VariableName, NumericalValue, Literal, Function, Operator>, UnitType>;
+		struct TYPE;//When type goes like [TYPE][VAR] - its a TYPE
+		struct TYPE_F;//When it's [TYPE][(] - its a TYPE_F
+		struct KEYWORD;//Allways goes [KEYWORD][(]
+		enum class UnitType { VAR, NUM, FUNC, OP, LIETARL, TYPE, TYPE_F, KEYWORD, NONE};//Variable, Numerical, Function, Operator, ...
+		using LogicalUnit = std::pair<std::variant<VariableName, NumericalValue, Literal, Function, Operator, TYPE, TYPE_F, KEYWORD>, UnitType>;
+
 
 		struct Object {
 			enum class NAME_TYPE {
@@ -226,7 +235,6 @@ class LogicalParser;
 			std::unordered_map<std::string, Object> Subobjects;
 			std::string Value;
 		};
-
 
 
 		
@@ -246,20 +254,31 @@ class LogicalParser;
 		};
 		struct Operator{
 			std::string Op;
+			int getPriority() const;
 			bool isActionOperator() const;
 		};
-		//Complex units; They can be deduced only after all previous units. They can remove units from m_units and use them inside!
-		struct EVAL_Num {
-
+		struct TYPE {
+			std::string str;
 		};
+		//Complex units; They can be deduced only after all previous units. They can remove units from m_units and use them inside!
 		struct Function {
 			//[[VAR][(](VAR/NUMERIC/EVAL_NUM/EVAL_STR/LITERAL/FUNC)[)] / [VAR][(][VAR/NUMERIC/EVAL_NUM/EVAL_STR/LITERAL/FUNC]<[,][VAR/NUMERIC/EVAL_NUM/EVAL_STR/LITERAL/FUNC]>[)]
 			int Arity=0;
 			VariableName Name;
 		};
+		struct TYPE_F {
+			std::string str;
+			std::vector<LogicalUnit> Args;
+			int Arity=0;
+		};
+		struct KEYWORD {
+			std::string str;
+			std::vector<LogicalUnit> Args;
+			int Arity=0;
+		};
 
 
-		std::vector<std::vector<LogicalUnit>> m_units;
+		std::vector<std::list<LogicalUnit>> m_units;
 
 		/*Checks if Buffer contains a LogicalUnit of a given type. If it does,
 		It will create an instance of it and return it. Otherwise nothing will be returned
@@ -272,12 +291,16 @@ class LogicalParser;
 		std::optional<Literal> IsThereLiteral(std::vector<LexicalParser::Lexema>& Lexemas, int From);
 		//Check if Lexema[From] Is operator. If it is builds and returns it
 		std::optional<Operator> IsThereOperator(std::vector<LexicalParser::Lexema>& Lexemas, int From);
+		//Check if Lexema[From] Is TYPE. If it is builds and returns it
+		std::optional<TYPE> IsThereType(std::vector<LexicalParser::Lexema>& Lexemas, int From);
+		//Check if Lexema[From] Is a Keyword. If it is builds and returns it
+		std::optional<KEYWORD> IsThereKeyword(std::vector<LexicalParser::Lexema>& Lexemas, int From);
 
 		std::list<LogicalUnit> ParseCommand(std::vector<LexicalParser::Lexema>& Lexemas);
 
 		//Collapse [VAR][(] in to [FUNCTION]
 		void CollapseFunctions(std::list<LogicalUnit>& Units);
-		std::vector<LogicalUnit> ToPostfix(std::list<LogicalUnit>& Units);
+		std::list<LogicalUnit> ToPostfix(std::list<LogicalUnit>& Units);
 
 		
 	public:
@@ -285,4 +308,87 @@ class LogicalParser;
 		void Parse(LexicalParser& LexicalParser);
 		void Print();
 
+	};
+
+	class Evaluator
+	{
+		/**!Evaluation rules
+		[VAR]
+		Shows variable value; Variable must presist in a ScopeStack;
+
+		[NUM/LITERAL]
+		Shows a value of NUM or Literal;
+
+		[VAR]=[NUM/LITERAL/VAR]
+		Assign value of right part to the Variable on the left.
+		Type of Variable on the right must match type of something on the right
+		All variables in this command must presist in a ScopeStack;
+
+		[{]<COMMAND>[}]
+		A block. Creates it's own scope. Can be used as a single COMMAND
+
+		[if][(][NUM][)][COMMAND]
+		Process next command only if NUM != 0; Yes, there is no bool type.
+		
+		[while][(][NUM][)][COMMAND]
+		Process next command while NUM == 0; Please, don't do infinite loop! There is no way to check for it. It's Turing-complete!
+		
+		[FUNC][(]([VAR/LITARAL/NUM]<[,][VAR/LITEARL/NUM]>)[)]
+		Calls a function. Function can be provided from somewhe. If there is no function with specified name, check str Variables.
+		If there is str Variable wth name of a specified function, evaluate it. But they should not have any input! They also can't have output!
+
+		There was a rule on how to create a variable. Well, no more! Now only using sys.createStr([NAME],[VAL])/sys.createNum([NAME],[VAL]);
+		*/	
+	private:
+
+		 enum class OBJTYPE { STR, NUM, NUM_DOTTED, UNDECLARED };
+		//Something, that can be accessed. It can recive
+		struct Variable {
+			OBJTYPE Type;
+			std::string name;
+			std::string Value;
+			//This methods can't be assigned in Language, but other code can use it to allow Language to manage it's variables as a regular variable
+			std::function<void(std::string)>m_set;
+			std::function<std::string()>m_get;
+
+			void set(std::string Val){
+				if (m_set) { m_set(Val); }
+				else { Value = Val; }
+			}
+			std::string get() {
+				if (m_get) { return m_get(); }
+				else { return Value; }
+			}
+
+		};
+		struct Function {
+			//Functions can't realy be set in language. But they can be accessed by other code!
+			OBJTYPE RetType;//If function returns UNDECLARED then it returns nothing
+			std::function<std::string(std::vector<std::string>)>Eval;
+		};
+		struct Holder {
+		private:
+			std::variant<Variable, Function> Holding;
+		public:
+			Holder(std::variant<Variable, Function> Obj) { Holding = Obj; }
+			template<typename T>
+			T get() const { static_assert(false, "Only Variable or Function can be used, to specialize this template"); }
+			template<>
+			Variable get() const { return std::get<Variable>(Holding); }
+			template<>
+			Function get() const { return std::get<Function>(Holding); }
+			std::unordered_map<std::string,Holder> Sub;
+			template<typename T>
+			bool isType() const { return std::holds_alternative<T>(Holding); }
+		};
+
+		std::unordered_map<std::string, Holder> Sub;
+
+		std::optional<Holder> FindName(const std::vector<std::string>& Name) const;
+
+		void ParseCommand(std::list<LogicalParser::LogicalUnit>& List);
+
+	public:
+
+		void Parse(LogicalParser& Input);
 	};

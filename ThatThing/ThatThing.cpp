@@ -63,13 +63,16 @@ int main()
 
 	LexicalParser TextParser;
 	LogicalParser LogicParser;
+	Evaluator Evlauatie;
 
 	Parser.RegisterParameter<TestOb, int>(&Obh,"TestObj.m_val", &TestOb::get, &TestOb::set);
 
-	TextParser.Parse("Val=f(fu(8,val+3)+4)");
+	//TextParser.Parse("Val=f(fu(8,val+3)+4)");
+	TextParser.Parse("Val=4");
 	LogicParser.Parse(TextParser);
 	printf("\n A LOGICAL PARSER!!!\n\n");
 	LogicParser.Print();
+	Evlauatie.Parse(LogicParser);
 	return 0;
 
 }
