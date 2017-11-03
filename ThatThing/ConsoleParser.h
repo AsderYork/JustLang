@@ -2,6 +2,7 @@
 #include <string>
 #include <functional>
 #include <vector>
+#include <map>
 #include <unordered_map>
 #include <variant>
 #include <optional>
@@ -177,35 +178,26 @@ class Evaluator;
 			Not all marks can have a meaning. There's a vector of ones that do
 			*/
 			static std::vector<std::string> AllowedMarks;
-			static std::vector<std::string> UsedTypes;
-			static std::vector<std::string> Keywords;
 			enum LEXEME_TYPE {
 				NONE,
 				NAME,//"A_name","Name34", "Ultra name"; Everything, that is a name of something. Or just a string of text
 				NUMBER,//"5"
 				NUMBER_DOTTED,
 				MARK,
-				LITERAL,
-				TYPENAME,//"str, num"//Can be function or precede a NAME
-				KEYWORD//"while", if;//Keywords acts as functions 
+				LITERAL
 			} Type;
 
 			std::string str;
 			Lexema(LEXEME_TYPE Type, std::string& _str) : Type(Type), str(_str) {}
 			Lexema() : Type(NONE), str() {}
 		};
-		//A state machine to parse a command;
 
-		Lexema m_tmpLexema;
-		std::vector<std::vector<Lexema>> m_parsedLexemas;
-
-		void PushTmpLexema();
-		void ParseOneCharacter(char& c);
-		std::string ParseOneCommand(std::string& line);
+		using RetType = std::vector<std::vector<Lexema>>;
+		void PushTmpLexema(RetType& TmpRet, Lexema& TmpLexema);
+		void ParseOneCharacter(char& c, RetType& TmpRet, Lexema& TmpLexema);
+		std::string ParseOneCommand(std::string& line, RetType& TmpRet, Lexema& TmpLexema);
 	public:
-		
-		std::vector<std::vector<Lexema>>& GetLexicalTable() { return m_parsedLexemas; }
-		void Parse(std::string line);
+		std::vector<std::vector<Lexema>> Parse(std::string line);
 	};
 
 	/**LOGICAL PARSER THINGS*/
@@ -218,12 +210,9 @@ class Evaluator;
 		struct NumericalValue;
 		struct Literal;
 		struct Function;
-		struct Operator;
-		struct TYPE;//When type goes like [TYPE][VAR] - its a TYPE
-		struct TYPE_F;//When it's [TYPE][(] - its a TYPE_F
-		struct KEYWORD;//Allways goes [KEYWORD][(]
-		enum class UnitType { VAR, NUM, FUNC, OP, LIETARL, TYPE, TYPE_F, KEYWORD, NONE};//Variable, Numerical, Function, Operator, ...
-		using LogicalUnit = std::pair<std::variant<VariableName, NumericalValue, Literal, Function, Operator, TYPE, TYPE_F, KEYWORD>, UnitType>;
+		struct Operator;		
+		enum class UnitType { VAR, NUM, FUNC, OP, LIETARL, NONE};//Variable, Numerical, Function, Operator, ...
+		using LogicalUnit = std::pair<std::variant<VariableName, NumericalValue, Literal, Function, Operator>, UnitType>;
 
 
 		struct Object {
@@ -257,28 +246,15 @@ class Evaluator;
 			int getPriority() const;
 			bool isActionOperator() const;
 		};
-		struct TYPE {
-			std::string str;
-		};
 		//Complex units; They can be deduced only after all previous units. They can remove units from m_units and use them inside!
 		struct Function {
 			//[[VAR][(](VAR/NUMERIC/EVAL_NUM/EVAL_STR/LITERAL/FUNC)[)] / [VAR][(][VAR/NUMERIC/EVAL_NUM/EVAL_STR/LITERAL/FUNC]<[,][VAR/NUMERIC/EVAL_NUM/EVAL_STR/LITERAL/FUNC]>[)]
 			int Arity=0;
 			VariableName Name;
 		};
-		struct TYPE_F {
-			std::string str;
-			std::vector<LogicalUnit> Args;
-			int Arity=0;
-		};
-		struct KEYWORD {
-			std::string str;
-			std::vector<LogicalUnit> Args;
-			int Arity=0;
-		};
 
 
-		std::vector<std::list<LogicalUnit>> m_units;
+		//std::vector<std::list<LogicalUnit>> m_units;
 
 		/*Checks if Buffer contains a LogicalUnit of a given type. If it does,
 		It will create an instance of it and return it. Otherwise nothing will be returned
@@ -291,10 +267,6 @@ class Evaluator;
 		std::optional<Literal> IsThereLiteral(std::vector<LexicalParser::Lexema>& Lexemas, int From);
 		//Check if Lexema[From] Is operator. If it is builds and returns it
 		std::optional<Operator> IsThereOperator(std::vector<LexicalParser::Lexema>& Lexemas, int From);
-		//Check if Lexema[From] Is TYPE. If it is builds and returns it
-		std::optional<TYPE> IsThereType(std::vector<LexicalParser::Lexema>& Lexemas, int From);
-		//Check if Lexema[From] Is a Keyword. If it is builds and returns it
-		std::optional<KEYWORD> IsThereKeyword(std::vector<LexicalParser::Lexema>& Lexemas, int From);
 
 		std::list<LogicalUnit> ParseCommand(std::vector<LexicalParser::Lexema>& Lexemas);
 
@@ -305,8 +277,8 @@ class Evaluator;
 		
 	public:
 
-		void Parse(LexicalParser& LexicalParser);
-		void Print();
+		std::vector<std::list<LogicalUnit>> Parse(std::vector<std::vector<LexicalParser::Lexema>>& Lexemics);
+		void Print(std::vector<std::list<LogicalUnit>>& Input);
 
 	};
 
@@ -341,54 +313,70 @@ class Evaluator;
 		*/	
 	private:
 
-		 enum class OBJTYPE { STR, NUM, NUM_DOTTED, UNDECLARED };
+		std::function<void(std::string&)> m_printer = [](std::string& s) {printf("%s\n", s.c_str());  };
+
+		 enum class OBJTYPE { STR, NUM, NUM_DOTTED, UNDECLARED, VAR };//VAR - can be used only as a return type for Functions!
 		//Something, that can be accessed. It can recive
 		struct Variable {
 			OBJTYPE Type;
-			std::string name;
 			std::string Value;
 			//This methods can't be assigned in Language, but other code can use it to allow Language to manage it's variables as a regular variable
 			std::function<void(std::string)>m_set;
 			std::function<std::string()>m_get;
 
 			void set(std::string Val){
-				if (m_set) { m_set(Val); }
-				else { Value = Val; }
+				if (m_set) { m_set(Val); }	else { Value = Val; }
 			}
 			std::string get() {
 				if (m_get) { return m_get(); }
 				else { return Value; }
 			}
-
+		
 		};
 		struct Function {
 			//Functions can't realy be set in language. But they can be accessed by other code!
 			OBJTYPE RetType;//If function returns UNDECLARED then it returns nothing
-			std::function<std::string(std::vector<std::string>)>Eval;
+			std::function<std::string(std::vector<std::string>&)>Eval;
+			int Arity = 0;//Amount of values function recives. If this value is bigger, then was passed, missing value will be empty strings
 		};
 		struct Holder {
 		private:
 			std::variant<Variable, Function> Holding;
 		public:
-			Holder(std::variant<Variable, Function> Obj) { Holding = Obj; }
+			bool canBeComplex = true;//True if new objects can be added to this one. False otherwise
+			Holder(std::variant<Variable, Function>& Obj) { Holding = std::move(Obj); }
+			Holder(Variable& Obj) : Holding(std::move(Obj)) {}
+			Holder(Function& Obj) : Holding(std::move(Obj)) {}
+			Holder() {}
+			Holder(const Holder&& Obj) : Holding(std::move(Obj.Holding)) {}
+			Holder& operator=(const Holder&& Obj) { Holding = std::move(Obj.Holding); return *this; }
+
 			template<typename T>
-			T get() const { static_assert(false, "Only Variable or Function can be used, to specialize this template"); }
-			template<>
-			Variable get() const { return std::get<Variable>(Holding); }
-			template<>
-			Function get() const { return std::get<Function>(Holding); }
-			std::unordered_map<std::string,Holder> Sub;
+			T& get() {return std::get<T>(Holding); }
+
+			std::map<std::string,Holder> Sub;
 			template<typename T>
 			bool isType() const { return std::holds_alternative<T>(Holding); }
+		
 		};
 
-		std::unordered_map<std::string, Holder> Sub;
+		std::map<std::string, Holder> Sub;
 
-		std::optional<Holder> FindName(const std::vector<std::string>& Name) const;
+		std::optional<std::map<std::string, Evaluator::Holder>::iterator> FindName(const std::vector<std::string>& Name);
 
 		void ParseCommand(std::list<LogicalParser::LogicalUnit>& List);
 
-	public:
+		void CreateDefaultEnviroment();
 
-		void Parse(LogicalParser& Input);
+		//Creates variable.
+		bool CreateVariable(std::vector<std::string> VarName, OBJTYPE VarType, std::string defValue = "", bool CanBeAugmented = true, std::function<void(std::string)>setter = nullptr,	std::function<std::string()>getter = nullptr);
+
+		bool CreateFunction(std::vector<std::string> VarName, OBJTYPE ReturnType, std::function<std::string(std::vector<std::string>&)>Func, int Arity, bool CanBeAugmented = true);
+
+		LexicalParser Lexical;
+		LogicalParser Logical;
+
+	public:
+		Evaluator();
+		void Parse(std::string Input);
 	};
