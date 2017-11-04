@@ -135,38 +135,6 @@ class Evaluator;
 
 	};
 
-	class ConsoleTextParser {
-	private:
-		static std::vector<std::string> Keywords;
-		
-		
-		//std::unordered_map<std::string, Object> m_variables;
-
-		/**
-		A Lexeme rule. Every simbol have some lexical releation.
-		Multiple symbols with same lexical relation forms one lexema.
-		If after a line of symbols with one lexical relation, comes a symbol with other lexical relation, it determines a new lexema
-		or considered a continuation of a current lexema
-		Here are a list of such metamorphoses.
-		(CurrentLexicalRelation)+(NewLexicalRelation)=(Continuation/new lexema)
-		NAME+NUMBER=Continuation
-		NMBER+MARK(.,-)=Continuation
-		Everything else is a new lexema
-		*/
-
-				
-
-		//std::vector<std::string> parseVariableHierarchy(std::vector<Lexema> Lexems);
-		//void addNewVariable(std::vector<std::string> Hierarchy, std::string type, std::string Val);
-
-
-	public:
-		//void AddVariable(std::string Name, std::string type = "str", std::string Value = "");
-
-		//void PrintAllVariables(std::unordered_map<std::string, Object>* map = nullptr, std::string Prefix = "");
-	
-	};
-
 	class LexicalParser
 	{
 	private:
@@ -311,11 +279,12 @@ class Evaluator;
 
 		There was a rule on how to create a variable. Well, no more! Now only using sys.createStr([NAME],[VAL])/sys.createNum([NAME],[VAL]);
 		*/	
+	public:
+		enum class OBJTYPE { STR, NUM, NUM_DOTTED, UNDECLARED, VAR };//VAR - can be used only as a return type for Functions!
 	private:
 
 		std::function<void(std::string&)> m_printer = [](std::string& s) {printf("%s\n", s.c_str());  };
 
-		 enum class OBJTYPE { STR, NUM, NUM_DOTTED, UNDECLARED, VAR };//VAR - can be used only as a return type for Functions!
 		//Something, that can be accessed. It can recive
 		struct Variable {
 			OBJTYPE Type;
@@ -379,6 +348,72 @@ class Evaluator;
 		std::optional<std::vector<std::string>> NameToHierarchy(std::string& name);
 
 	public:
+
+		void SetPrinter(std::function<void(std::string&)> Printer);
+
+		template<typename T>
+		static T DefualtTranslator(std::string str)
+		{
+			static_assert(false, "There is no default translator, switable for this type");
+		}
+		template<>
+		static int DefualtTranslator(std::string str)
+		{
+			return std::stoi(str);
+		}
+		template<>
+		static float DefualtTranslator(std::string str)
+		{
+			return std::stof(str);
+		}
+		template<>
+		static bool DefualtTranslator(std::string str)
+		{
+			if (str.compare("1") == 0) { return true; }
+			return false;
+		}
+		template<>
+		static std::string DefualtTranslator(std::string str)
+		{
+			return str;
+		}
+
+		template<class ParamClass, typename T>
+		bool RegisterObjectParameter(ParamClass* ObjPointer, std::string ParamName,
+			const T(ParamClass::*getter)() const,
+			void (ParamClass::*setter)(T),
+			OBJTYPE Type,
+			std::function<T(std::string&)> ValFromString = DefualtTranslator<T>,
+			std::function<std::string(T)> ValToString = [](T val) {return std::to_string(val); })
+		{
+			auto& Hierarchy = NameToHierarchy(ParamName);
+			if (!Hierarchy) { return false; }
+			
+			auto& GetterFunc = std::bind(ValToString, std::bind(getter, ObjPointer));
+
+			auto& SetterFunc = std::bind(setter, ObjPointer, std::bind(ValFromString, std::placeholders::_1));
+
+			return CreateVariable((*Hierarchy), Type, "", true, SetterFunc, GetterFunc);
+			
+		};
+
+
+
+		template<class ParamClass, typename T, typename... Args>
+		bool RegisterObjectFunction(ParamClass* Obj, T (ParamClass::*Func)(Args...) )
+		{
+
+			//std::is_placeholder
+			//auto& OnlyStrings = std::bind(Func, Obj, Evaluator::DefualtTranslator<Args>()...);
+
+			std::index_sequence_for<Args> Seq;
+
+
+			printf("Yeaa!\n");
+			return true;
+
+		}
+
 		Evaluator();
 		void Parse(std::string Input);
 	};

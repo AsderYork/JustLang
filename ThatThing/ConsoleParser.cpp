@@ -960,7 +960,7 @@ bool Evaluator::CreateVariable(std::vector<std::string> VarName, OBJTYPE VarType
 	Var.Type = VarType;
 	Var.m_set = setter;
 	Var.m_get = getter;
-	Var.set(defValue);
+	if (defValue.size() != 0) { Var.set(defValue); }
 	InResult.first->second = std::move(Holder(Var));
 	InResult.first->second.canBeComplex = CanBeAugmented;
 	return true;
@@ -989,10 +989,6 @@ bool Evaluator::CreateFunction(std::vector<std::string> VarName, OBJTYPE ReturnT
 std::optional<std::vector<std::string>> Evaluator::NameToHierarchy(std::string & name)
 {
 	auto& Result = Lexical.Parse(name);
-	if ((Result.size() != 1) ||
-		(Result.front().size() != 1) ||
-		(Result.front().front().Type != LexicalParser::Lexema::NAME)) {	return std::nullopt;}
-
 	auto& LogResult = Logical.Parse(Result);
 
 	if ((LogResult.size() != 1) ||
@@ -1000,6 +996,11 @@ std::optional<std::vector<std::string>> Evaluator::NameToHierarchy(std::string &
 		(LogResult.front().front().second != LogicalParser::UnitType::VAR)) {return std::nullopt; }
 
 	return std::optional<std::vector<std::string>>(std::get<LogicalParser::VariableName>(LogResult.front().front().first).Hierarchy);
+}
+
+void Evaluator::SetPrinter(std::function<void(std::string&)> Printer)
+{
+	m_printer = Printer;
 }
 
 Evaluator::Evaluator()

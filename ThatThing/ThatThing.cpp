@@ -1,6 +1,7 @@
 // Example program
 #include <iostream>
 #include "ConsoleParser.h"
+#include "ConsoleParserHelper.h"
 
 class TestOb
 {
@@ -14,6 +15,11 @@ public:
 
 	TestOb() { printf("TestObj/Construct:%i\n", m_val); }
 	~TestOb() { printf("TestObj/Destruct:%i\n", m_val); }
+
+	float  Funcqweq() {
+		//printf("Call! %i,%f\n", A, S);
+		return 13.3f;
+	}
 };
 
 /**!
@@ -37,13 +43,19 @@ There are also Variables [VAR]. Variables can be one of 3 types above. They can 
 
 int main()
 {
-	
+	Mn();
 	TestOb Obh;
 	ConsoleParser Parser;
 
 	Evaluator Evlauatie;
 
+	auto Func = RegisterObjectFunction(&Obh, &TestOb::Funcqweq);
+	std::vector<std::string> Paramet = { "4", "81.5", "-1", "1"};
+	std::string Res = Func.first(Paramet);
+
+
 	Parser.RegisterParameter<TestOb, int>(&Obh,"TestObj.m_val", &TestOb::get, &TestOb::set);
+	Evlauatie.RegisterObjectParameter<TestOb, int>(&Obh, "TestObj.m_val", &TestOb::get, &TestOb::set, Evaluator::OBJTYPE::NUM);
 
 	//Evlauatie.Parse("sys.Silence(sys.NewNum(\"Result\", 2+(10*4)));Result;");
 	//Evlauatie.Parse("\"Lit\\\"Q\\\"W\ \"");

@@ -145,6 +145,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ConsoleParser.h" />
+    <ClInclude Include="ConsoleParserHelper.h" />
     <ClInclude Include="RingBuffer.h" />
     <ClInclude Include="SomeHeader.h" />
     <ClInclude Include="stdafx.h" />
