@@ -37,7 +37,12 @@ void LexicalParser::ParseOneCharacter(char & c, RetType& TmpRet, Lexema& TmpLexe
 {
 	if (TmpLexema.Type == Lexema::LITERAL)
 	{
-		if (c == '"') { PushTmpLexema(TmpRet, TmpLexema); return; }
+		if (TmpLexema.str.size() > 0) {
+			if (TmpLexema.str[TmpLexema.str.size() - 1] == '\\') {
+				if (c == '"') { TmpLexema.str[TmpLexema.str.size() - 1] = '"'; return; }
+			}
+			else if (c == '"') { PushTmpLexema(TmpRet, TmpLexema); return; }
+		}
 	}
 	else if (isdigit(c))
 	{
@@ -98,7 +103,7 @@ std::string LexicalParser::ParseOneCommand(std::string &line, RetType& TmpRet, L
 {
 	TmpRet.emplace_back();//Add new command
 	std::string RemainingCommand;
-
+	bool isEscaped = false;
 	for (int i = 0; i < line.size(); i++)
 	{
 		if (TmpLexema.Type == Lexema::LITERAL){ParseOneCharacter(line[i], TmpRet, TmpLexema);}
@@ -405,8 +410,10 @@ void LogicalParser::Print(std::vector<std::list<LogicalParser::LogicalUnit>>& In
 
 int LogicalParser::Operator::getPriority() const
 {
-	if (Op == "*" || Op == "/") { return 2; }
-	if (Op == "+" || Op == "-") { return 1; }
+	if (Op == "*" || Op == "/") { return 4; }
+	if (Op == "+" || Op == "-") { return 3; }
+	if (Op == "%") { return 2; }
+	if (Op == "==" || Op == "<=" || Op == ">=" || Op == "<" || Op == ">" || Op == "!=") { return 1; }
 	return 0;
 }
 
@@ -439,6 +446,7 @@ std::optional<std::map<std::string, Evaluator::Holder>::iterator> Evaluator::Fin
 void Evaluator::ParseCommand(std::list<LogicalParser::LogicalUnit>& List)
 {
 	std::vector<LogicalParser::LogicalUnit> Buffer;
+	bool WhileBlockActive = false;
 
 	//Finds object with provided name. Or function.
 	auto FindObj = [&](LogicalParser::LogicalUnit& Obj) -> Holder& {
@@ -482,7 +490,7 @@ void Evaluator::ParseCommand(std::list<LogicalParser::LogicalUnit>& List)
 			auto& Found = FindObj(Obj);
 			if (Found.isType<Variable>())
 				if (Found.get<Variable>().Type == OBJTYPE::NUM_DOTTED) { return std::make_pair(Found.get<Variable>().get(), true); }
-				else if (Found.get<Variable>().Type == OBJTYPE::NUM) { return std::make_pair(Found.get<Variable>().get(), true); }
+				else if (Found.get<Variable>().Type == OBJTYPE::NUM) { return std::make_pair(Found.get<Variable>().get(), false); }
 
 		}
 		throw std::exception("A value is requested as numeric. But it's not numeric!");
@@ -726,8 +734,45 @@ void Evaluator::ParseCommand(std::list<LogicalParser::LogicalUnit>& List)
 	};
 
 	auto ProcessFunction = [&](LogicalParser::Function& Func) {
+		if (Func.Name.Hierarchy.size() == 1) //Then it might be keyword
+		{
+			if (Func.Name.Hierarchy[0] == "if")
+			{
+				if (Func.Arity != 1) { throw std::exception("if statement can have only one argument!"); }
+				else if(!CanBeNUM(Buffer.back())) { throw std::exception("if statement can have only numeric argument! 1 for true and 0 for false"); }
+				else {
+					//If argument is '1' then continue execution. If it's not, then stop it!
+					if (GetAsNUM(Buffer.back()).first != "1") {
+						Buffer.pop_back(); return false;
+					}
+					else {
+						Buffer.pop_back(); return true;
+					}
+				}
+			}
+			if (Func.Name.Hierarchy[0] == "while")
+			{
+				if (Func.Arity != 1) { throw std::exception("while statement can have only one argument!"); }
+				else if (!CanBeNUM(Buffer.back())) { throw std::exception("while statement can have only numeric argument! 1 for true and 0 for false"); }
+				else {
+					//If argument is '1' then continue execution. If it's not, then stop it!
+					if (GetAsNUM(Buffer.back()).first == "1") {
+						Buffer.pop_back(); WhileBlockActive = true;
+						return true;
+					}
+					else {
+						Buffer.pop_back(); WhileBlockActive = false;
+						return false;
+					}
+				}
+			}
+		}
 		auto& FuncObj = FindFunc(Func);
-		if (FuncObj.isType<Variable>() && Func.Arity != 0) { throw std::exception("Variable functions can't accept parameters!"); }
+		if (FuncObj.isType<Variable>())
+		{
+			if (Func.Arity != 0) { throw std::exception("Variable functions can't accept parameters!"); }
+			Parse(FuncObj.get<Variable>().get());
+		}		
 		else if (FuncObj.isType<Function>())
 		{
 			auto& FuncFunc = FuncObj.get<Function>();
@@ -762,42 +807,54 @@ void Evaluator::ParseCommand(std::list<LogicalParser::LogicalUnit>& List)
 				case OBJTYPE::UNDECLARED: {
 					break;
 				}
+				case OBJTYPE::VAR: {
+					LogicalParser::VariableName RetVar;
+					auto& Name = NameToHierarchy(Ret);
+					if (!Name) { throw std::exception("Function claims that its returning a Variable name, but it's return value cannot be used as a name!"); }
+					RetVar.Hierarchy = (*Name);
+					Buffer.emplace_back(RetVar, LogicalParser::UnitType::VAR);
+					break;
+				}
+				default:
+				{
+					throw std::exception("Function returned unexpected type!");
+				}
 			}
 		}
-		
+		return true;
 	};
 
-	for (auto Obj : List)
-	{
-		switch (Obj.second)
+	do {
+		for (auto Obj : List)
 		{
-		case LogicalParser::UnitType::LIETARL:
-		case LogicalParser::UnitType::NUM:
-		case LogicalParser::UnitType::VAR: {
-			Buffer.push_back(Obj);
-			break;
+			switch (Obj.second)
+			{
+			case LogicalParser::UnitType::LIETARL:
+			case LogicalParser::UnitType::NUM:
+			case LogicalParser::UnitType::VAR: {
+				Buffer.push_back(Obj);
+				break;
+			}
+			case LogicalParser::UnitType::OP:
+			{
+				ProcessOperator(std::get<LogicalParser::Operator>(Obj.first).Op);
+				break;
+			}
+			case LogicalParser::UnitType::FUNC:
+			{
+				if (!ProcessFunction((std::get<LogicalParser::Function>(Obj.first)))) { return; };
+				break;
+			}
+			default: {
+				throw std::exception("The world is not ready!");
+			}
+			}
 		}
-		case LogicalParser::UnitType::OP:
+		if (Buffer.size() == 1)
 		{
-			ProcessOperator(std::get<LogicalParser::Operator>(Obj.first).Op);
-			break;
+			m_printer(JustGet(Buffer.front()));
 		}
-
-		case LogicalParser::UnitType::FUNC:
-		{
-			ProcessFunction((std::get<LogicalParser::Function>(Obj.first)));
-			break;
-		}
-		default: {
-			throw std::exception("The world is not ready!");
-		}
-		}
-
-	}
-	if (Buffer.size() == 1)
-	{
-		m_printer(JustGet(Buffer.front()));
-	}
+	} while (WhileBlockActive);
 }
 
 void Evaluator::CreateDefaultEnviroment()
@@ -806,67 +863,79 @@ void Evaluator::CreateDefaultEnviroment()
 
 	//Creates new string with the name of the provided literal and default value in second provided parameter
 	FuncType NewStr = [this](std::vector<std::string>& In) -> std::string {
-		auto& Result = Lexical.Parse(In[0]);
-		if ((Result.size() != 1) ||
-			(Result.front().size() != 1) ||
-			(Result.front().front().Type != LexicalParser::Lexema::NAME)) { throw std::exception("First parameter must be variable name"); }
+		auto& Hierarchy = NameToHierarchy(In[0]);
+		if (!Hierarchy) { throw std::exception("First parameter must be a variable name!"); }
 
-		auto& LogResult = Logical.Parse(Result);
-
-		if ((LogResult.size() != 1) ||
-			(LogResult.front().size() != 1) ||
-			(LogResult.front().front().second != LogicalParser::UnitType::VAR)) {
-			throw std::exception("First parameter must be variable name");
+		if (In.size() == 2)
+		{
+			return CreateVariable((*Hierarchy), OBJTYPE::STR, In[1]) ? "1" : "0";
 		}
-		return CreateVariable(std::get<LogicalParser::VariableName>(LogResult.front().front().first).Hierarchy, OBJTYPE::STR, In[1]) ?  "1" : "0";
+		else
+		{
+			return CreateVariable((*Hierarchy), OBJTYPE::STR) ? "1" : "0";
+		}
 	};
 	CreateFunction({ "sys","NewStr" }, OBJTYPE::NUM, NewStr, 2, false);
 
 	//Creates new Numeric with the name of the provided literal and default value in second provided parameter
 	FuncType NewNum = [this](std::vector<std::string>& In) -> std::string {
-		auto& Result = Lexical.Parse(In[0]);
-		if ((Result.size() != 1) ||
-			(Result.front().size() != 1) ||
-			(Result.front().front().Type != LexicalParser::Lexema::NAME)) {
-			throw std::exception("First parameter must be variable name");
+
+		auto& Hierarchy = NameToHierarchy(In[0]);
+		if (!Hierarchy) { throw std::exception("First parameter must be a variable name!"); }
+		if (In.size() == 2)
+		{
+			return CreateVariable((*Hierarchy), OBJTYPE::NUM, In[1]) ? "1" : "0";
+		}
+		else
+		{
+			return CreateVariable((*Hierarchy), OBJTYPE::NUM) ? "1" : "0";
 		}
 
-		auto& LogResult = Logical.Parse(Result);
-
-		if ((LogResult.size() != 1) ||
-			(LogResult.front().size() != 1) ||
-			(LogResult.front().front().second != LogicalParser::UnitType::VAR)) {
-			throw std::exception("First parameter must be variable name");
-		}
-		return CreateVariable(std::get<LogicalParser::VariableName>(LogResult.front().front().first).Hierarchy, OBJTYPE::NUM, In[1]) ? "1" : "0";
 	};
 	CreateFunction({ "sys","NewNum" }, OBJTYPE::NUM, NewNum, 2, false);
 
 	//Creates new DottedNumeric with the name of the provided literal and default value in second provided parameter
 	FuncType NewNumDot = [this](std::vector<std::string>& In) -> std::string {
-		auto& Result = Lexical.Parse(In[0]);
-		if ((Result.size() != 1) ||
-			(Result.front().size() != 1) ||
-			(Result.front().front().Type != LexicalParser::Lexema::NAME)) {
-			throw std::exception("First parameter must be variable name");
+		auto& Hierarchy = NameToHierarchy(In[0]);
+		if (!Hierarchy) { throw std::exception("First parameter must be a variable name!"); }
+		if (In.size() == 2) 
+		{
+			return CreateVariable((*Hierarchy), OBJTYPE::NUM_DOTTED, In[1]) ? "1" : "0";
 		}
-
-		auto& LogResult = Logical.Parse(Result);
-
-		if ((LogResult.size() != 1) ||
-			(LogResult.front().size() != 1) ||
-			(LogResult.front().front().second != LogicalParser::UnitType::VAR)) {
-			throw std::exception("First parameter must be variable name");
+		else
+		{
+			return CreateVariable((*Hierarchy), OBJTYPE::NUM_DOTTED) ? "1" : "0";
 		}
-		return CreateVariable(std::get<LogicalParser::VariableName>(LogResult.front().front().first).Hierarchy, OBJTYPE::NUM_DOTTED, In[1]) ? "1" : "0";
 	};
 	CreateFunction({ "sys","NewNumDot" }, OBJTYPE::NUM, NewNumDot, 2, false);
 
-	//Allow any parameter to be consumedm without printing anything
+	//Allow any parameter to be consumed without printing anything
 	FuncType Silence = [this](std::vector<std::string>& In) -> std::string {
 		return "";
 	};
 	CreateFunction({ "sys","Silence" }, OBJTYPE::UNDECLARED, Silence, 999, false);
+
+
+	//Create Str out of input
+	FuncType Str = [this](std::vector<std::string>& In) -> std::string {		
+		return In[0];
+	};
+	CreateFunction({ "Str"}, OBJTYPE::STR, Str, 1, false);
+
+	FuncType Num = [this](std::vector<std::string>& In) -> std::string {
+		return In[0];
+	};
+	CreateFunction({ "Num" }, OBJTYPE::NUM, Num, 1, false);
+
+	FuncType NumDot = [this](std::vector<std::string>& In) -> std::string {
+		return In[0];
+	};
+	CreateFunction({ "NumDot" }, OBJTYPE::NUM_DOTTED, NumDot, 1, false);
+
+	FuncType Var = [this](std::vector<std::string>& In) -> std::string {
+		return In[0];
+	};
+	CreateFunction({ "Var" }, OBJTYPE::VAR, Var, 1, false);
 }
 
 bool Evaluator::CreateVariable(std::vector<std::string> VarName, OBJTYPE VarType, std::string defValue, bool CanBeAugmented,std::function<void(std::string)> setter, std::function<std::string()> getter)
@@ -915,6 +984,22 @@ bool Evaluator::CreateFunction(std::vector<std::string> VarName, OBJTYPE ReturnT
 	InResult.first->second = std::move(Holder(NewFunc));
 	InResult.first->second.canBeComplex = CanBeAugmented;	
 	return true;
+}
+
+std::optional<std::vector<std::string>> Evaluator::NameToHierarchy(std::string & name)
+{
+	auto& Result = Lexical.Parse(name);
+	if ((Result.size() != 1) ||
+		(Result.front().size() != 1) ||
+		(Result.front().front().Type != LexicalParser::Lexema::NAME)) {	return std::nullopt;}
+
+	auto& LogResult = Logical.Parse(Result);
+
+	if ((LogResult.size() != 1) ||
+		(LogResult.front().size() != 1) ||
+		(LogResult.front().front().second != LogicalParser::UnitType::VAR)) {return std::nullopt; }
+
+	return std::optional<std::vector<std::string>>(std::get<LogicalParser::VariableName>(LogResult.front().front().first).Hierarchy);
 }
 
 Evaluator::Evaluator()

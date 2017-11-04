@@ -376,6 +376,8 @@ class Evaluator;
 		LexicalParser Lexical;
 		LogicalParser Logical;
 
+		std::optional<std::vector<std::string>> NameToHierarchy(std::string& name);
+
 	public:
 		Evaluator();
 		void Parse(std::string Input);

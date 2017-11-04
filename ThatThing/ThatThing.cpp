@@ -45,12 +45,15 @@ int main()
 
 	Parser.RegisterParameter<TestOb, int>(&Obh,"TestObj.m_val", &TestOb::get, &TestOb::set);
 
-	Evlauatie.Parse("sys.Silence(sys.NewNum(\"Result\", 2+(10*4)));Result;");
+	//Evlauatie.Parse("sys.Silence(sys.NewNum(\"Result\", 2+(10*4)));Result;");
+	//Evlauatie.Parse("\"Lit\\\"Q\\\"W\ \"");
+	std::string Command = "\\\"Hello world!\\\"";
+	Evlauatie.Parse("sys.NewStr(\"Seq\",\" "+ Command+ " \")");
 	while (true)
 	{
-		std::string UserInput;
-		std::cin >> UserInput;
-		Evlauatie.Parse(UserInput);
+		char input[512];
+		std::cin.getline(input, sizeof(input));
+		Evlauatie.Parse(input);
 	}
 
 	return 0;
